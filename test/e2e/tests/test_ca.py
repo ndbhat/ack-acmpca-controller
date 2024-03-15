@@ -23,12 +23,13 @@ import re
 from acktest.resources import random_suffix_name
 from acktest.k8s import resource as k8s
 from acktest.k8s.resource import _get_k8s_api_client
+from acktest import tags
 from kubernetes import client
 from e2e import service_marker, CRD_GROUP, CRD_VERSION, load_acmpca_resource
 from e2e.replacement_values import REPLACEMENT_VALUES
 from e2e.tests.helper import ACMPCAValidator
 from e2e.fixtures import k8s_secret
-from acktest import tags
+from e2e.bootstrap_resources import get_bootstrap_resources
 
 RESOURCE_PLURAL = "certificateauthorities"
 
@@ -103,6 +104,10 @@ class TestCertificateAuthority:
         assert ca["CertificateAuthorityConfiguration"]["Subject"]["State"] == "Virginia"
         assert ca["CertificateAuthorityConfiguration"]["KeyAlgorithm"] == "RSA_2048"
         assert ca["CertificateAuthorityConfiguration"]["SigningAlgorithm"] == "SHA256WITHRSA"
+        assert ca["RevocationConfiguration"]["CrlConfiguration"]["Enabled"] == False
+        assert ca["RevocationConfiguration"]["OcspConfiguration"]["Enabled"] == False
+        assert ca["UsageMode"] == "GENERAL_PURPOSE"
+        assert ca["KeyStorageSecurityStandard"] == "FIPS_140_2_LEVEL_3_OR_HIGHER"
 
         # Check Tags
         expected_tags = [
@@ -131,13 +136,95 @@ class TestCertificateAuthority:
         assert 'status' in ca_cr['status']
         assert ca_cr['status']['status'] == "PENDING_CERTIFICATE"
     
+    def test_update(self, acmpca_client): #, simple_certificate_authority):
+        #(ca_cr, ca_ref, ca_resource_arn) = simple_certificate_authority
+
+        ca_name = random_suffix_name("certificate-authority", 50)
+        replacements = {}
+        suffix = random_suffix_name("", 2)
+        replacements["NAME"] = ca_name
+        replacements["COMMON_NAME"] = "www.example" + suffix + ".com"
+        replacements["COUNTRY"] = "US"
+        replacements["LOCALITY"] = "Arlington"
+        replacements["ORG"] = "Example Organization " + suffix
+        replacements["STATE"] = "Virginia"
+        resources = get_bootstrap_resources()
+        replacements["BUCKET_NAME"] = resources.CABucket.name
+
+        # Load CA CR
+        ca_resource_data = load_acmpca_resource(
+            "certificate_authority_rev_config",
+            additional_replacements=replacements,
+        )
+
+        # Create k8s resource
+        ca_ref = k8s.create_reference(
+            CRD_GROUP, CRD_VERSION, RESOURCE_PLURAL,
+            ca_name, namespace="default",
+        )
+        k8s.create_custom_resource(ca_ref, ca_resource_data)
+        ca_cr = k8s.wait_resource_consumed_by_controller(ca_ref)
+
+        time.sleep(CREATE_WAIT_AFTER_SECONDS)
+
+        assert ca_cr is not None
+        assert k8s.get_resource_exists(ca_ref)
+        logging.info(ca_cr)
+
+        ca_resource_arn =  k8s.get_resource_arn(ca_cr)
+        assert ca_resource_arn is not None
+
+        # Check CA status is PENDING_CERTIFICATE
+        acmpca_validator = ACMPCAValidator(acmpca_client)
+        #acmpca_validator.assert_certificate_authority(ca_resource_arn, "PENDING_CERTIFICATE")'''
+     
+        '''"RevocationConfiguration": {
+            "CrlConfiguration": {
+            "CustomCname": "https://somename.crl",
+            "Enabled": true,
+            "S3BucketName": "your-bucket-name",
+            "ExpirationInDays": 3650
+            }'''
+        
+        resources = get_bootstrap_resources()
+
+        '''updates = {
+            "spec": {
+                'revocationConfiguration': {
+                    'crlConfiguration': {
+                        'enabled': True,
+                        'expirationInDays': 3650,
+                        's3BucketName': resources.CABucket.name
+                    }
+                }
+            },
+        }
+        patch_res = k8s.patch_custom_resource(ca_ref, updates)
+        logging.info(patch_res)
+        time.sleep(UPDATE_WAIT_AFTER_SECONDS)'''
+
+        ca = acmpca_validator.assert_certificate_authority(ca_resource_arn, "PENDING_CERTIFICATE")
+        assert ca["RevocationConfiguration"]["CrlConfiguration"]["Enabled"] == True
+        assert ca["RevocationConfiguration"]["CrlConfiguration"]["S3BucketName"] == resources.CABucket.name
+        assert ca["RevocationConfiguration"]["CrlConfiguration"]["ExpirationInDays"] == 3650
+
+        #Delete CA k8s resource
+        _, deleted = k8s.delete_custom_resource(ca_ref)
+        assert deleted is True
+
+        time.sleep(DELETE_WAIT_AFTER_SECONDS) 
+
+        # Check CA status is DELETED
+        acmpca_validator = ACMPCAValidator(acmpca_client)
+        acmpca_validator.assert_certificate_authority(ca_resource_arn, "DELETED")
+
     def test_update_tags(self, acmpca_client, simple_certificate_authority):
         
         (ca_cr, ca_ref, ca_resource_arn) = simple_certificate_authority
 
         # Check CA status is PENDING_CERTIFICATE
         acmpca_validator = ACMPCAValidator(acmpca_client)
-        ca = acmpca_validator.assert_certificate_authority(ca_resource_arn, "PENDING_CERTIFICATE")
+        acmpca_validator.assert_certificate_authority(ca_resource_arn, "PENDING_CERTIFICATE")
 
         # Update CA tags
         new_tags = [

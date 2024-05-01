@@ -75,6 +75,9 @@ func (rm *resourceManager) sdkFind(
 
 	var resp *svcsdk.GetCertificateOutput
 	resp, err = rm.sdkapi.GetCertificateWithContext(ctx, input)
+	if err != nil && strings.HasPrefix(err.Error(), "RequestInProgressException") {
+		return r, ackrequeue.NeededAfter(err, ackrequeue.DefaultRequeueAfterDuration)
+	}
 	rm.metrics.RecordAPICall("READ_ONE", "GetCertificate", err)
 	if err != nil {
 		if reqErr, ok := ackerr.AWSRequestFailure(err); ok && reqErr.StatusCode() == 404 {
@@ -92,9 +95,6 @@ func (rm *resourceManager) sdkFind(
 
 	rm.setStatusDefaults(ko)
 	err = rm.writeCertificateToSecret(ctx, *resp.Certificate, r.ko.ObjectMeta)
-	if err != nil && strings.HasPrefix(err.Error(), "RequestInProgressException") {
-		return &resource{ko}, ackrequeue.NeededAfter(err, ackrequeue.DefaultRequeueAfterDuration)
-	}
 	if err != nil {
 		return nil, err
 	}

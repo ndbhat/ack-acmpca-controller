@@ -13,17 +13,48 @@
 """Bootstraps the resources required to run the ACM PCA integration tests.
 """
 import logging
+import json
 
 from acktest.bootstrapping import Resources, BootstrapFailureException
-
+from acktest.bootstrapping.s3 import Bucket
 from e2e import bootstrap_directory
 from e2e.bootstrap_resources import BootstrapResources
+
+BUCKET_POLICY = """{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "1",
+            "Effect": "Allow",
+            "Principal": {"Service": "acm-pca.amazonaws.com"},
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl",
+                "s3:GetBucketAcl",
+                "s3:GetBucketLocation"
+            ],
+            "Resource":[
+                "arn:aws:s3:::$NAME/*",
+                "arn:aws:s3:::$NAME"
+            ],
+            "Condition":{
+                "StringEquals":{
+                    "aws:SourceAccount":"$ACCOUNT_ID"
+                }
+            }
+        }
+    ]
+}"""
+
 
 def service_bootstrap() -> Resources:
     logging.getLogger().setLevel(logging.INFO)
 
     resources = BootstrapResources(
-        # TODO: Add bootstrapping when you have defined the resources
+        CABucket=Bucket(
+            "ack-acmpca-controller-ca-tests",
+            policy= BUCKET_POLICY
+        )
     )
 
     try:

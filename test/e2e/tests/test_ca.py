@@ -29,6 +29,7 @@ from e2e.replacement_values import REPLACEMENT_VALUES
 from e2e.tests.helper import ACMPCAValidator
 from e2e.fixtures import k8s_secret
 from acktest import tags
+from e2e.bootstrap_resources import get_bootstrap_resources
 
 RESOURCE_PLURAL = "certificateauthorities"
 
@@ -47,6 +48,9 @@ def simple_certificate_authority(acmpca_client):
     replacements["LOCALITY"] = "Arlington"
     replacements["ORG"] = "Example Organization " + suffix
     replacements["STATE"] = "Virginia"
+
+    resources = get_bootstrap_resources()
+    replacements["BUCKET"] = resources.CABucket.name
 
     # Load CA CR
     ca_resource_data = load_acmpca_resource(
